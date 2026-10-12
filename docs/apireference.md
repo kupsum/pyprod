@@ -250,8 +250,9 @@ The message passing engine tracks and persists all communication between **Busin
 pyprod provides two approaches to encapsulate your information in the form of a persistable message depending on the serialization format used.
 
 1. **JsonSerialize**  
-This class uses python's built in json module to convert your message to and from a serialized format.   
-**NOTE**: There is a provision to speed up message passing for JsonSerialize messages by using a third party library called orjson instead of python's in-built json module.
+This class uses python's built in json module to convert your message to and from a serialized format.
+**NOTE**: There is a provision to speed up message passing for JsonSerialize messages by using a third party library called
+orjson instead of python's in-built json module. To customize dump/load (for example with a third-party JSON library in your project), subclass `JsonSerialize` class and override `_dump_by_serializer` and `_load_by_serializer` on your message class.
 
 2. **PickleSerialize**  
 This class used python's in-built pickle module to convert your messages to and from a serialized format.  

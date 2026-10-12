@@ -1,8 +1,10 @@
+from abc import abstractmethod
 import ast
 import importlib
 import inspect
 import pickle
 import sys
+from typing import Any
 
 import iris
 
@@ -720,10 +722,9 @@ class ProductionMessage:
                         setattr(self, name, val)
             else:
                 if serializer != "pickle":
-                    import json
                     # building using iris_message_object and json_str_or_dict. This is primarily to be used by IRIS side.
                     data = (json_str_or_dict if isinstance(json_str_or_dict, dict)
-                        else json.loads(json_str_or_dict))
+                        else self._load_by_serializer(json_str_or_dict))
 
                     # 3) For each field, decide its runtime default:
                     #  Note: We do not re-instantiate defaults as we assume that the json_str_or_dict is populated as expected, and in case
@@ -830,6 +831,23 @@ class ProductionMessage:
         pass
         # raise NotImplementedError("must write this method for each subclass to define serialization tactics")
 
+    @staticmethod
+    @abstractmethod
+    def _dump_by_serializer(data: dict) -> Any:
+        """
+        Dump the data by the serializer.
+        """
+        raise NotImplementedError("Subclass must implement _dump_by_serializer")
+
+    @staticmethod
+    @abstractmethod
+    def _load_by_serializer(data: Any) -> dict:
+        """
+        Load the data by the serializer.
+        """
+        raise NotImplementedError("Subclass must implement _load_by_serializer")
+
+
 class JsonSerialize(ProductionMessage):
     __slots__ = ("_serial_stream",)
 
@@ -864,11 +882,9 @@ class JsonSerialize(ProductionMessage):
         not self.__dict__, so internal attributes and accidental extras are excluded.
         """
         if iteration == 0:
-            import json
-
             cls = type(self)
             data = {name: getattr(self, name) for name in cls._field_names}
-            object.__setattr__(self, "_serial_stream", json.dumps(data))
+            object.__setattr__(self, "_serial_stream", self._dump_by_serializer(data))
 
         return object.__getattribute__(self, "_serial_stream")[start:end]
     
@@ -897,8 +913,28 @@ class JsonSerialize(ProductionMessage):
         for prop in self._column_field_names:
             setattr(message_object, snake_to_pascal(prop), getattr(self, prop))
 
+    @staticmethod
+    def _dump_by_serializer(data: dict) -> str:
+        """
+        Dump the data to a JSON string.
+        This method can be overridden to customize the JSON serialization.
+        For example, more compact serialization with json.dumps(..., separators=(',', ':')).
+        """
+        import json
+        return json.dumps(data)
 
-def unpickle_binary(iris_message_object,MsgCls):
+    @staticmethod
+    def _load_by_serializer(data: str) -> dict:
+        """
+        Load the data from a JSON string.
+        This method can be overridden to customize the JSON deserialization.
+        For example, a faster JSON library in the user's project.
+        """
+        import json
+        return json.loads(data)
+
+
+def unpickle_binary(iris_message_object,MsgCls: type["PickleSerialize"]):
 
     chunk_size = BELOW_MAX_STRING
     iteration = 0
@@ -913,7 +949,7 @@ def unpickle_binary(iris_message_object,MsgCls):
     binary_serial_msg = b"".join(chunks)
 
     if binary_serial_msg:
-        this_object = pickle.loads(binary_serial_msg)
+        this_object = MsgCls._load_by_serializer(binary_serial_msg)
         this_object._iris_message_wrapper = iris_message_object
     else: 
         this_object = MsgCls()
@@ -949,12 +985,10 @@ class PickleSerialize(ProductionMessage):
     def chunks_from_python(self, iteration, start, end):
 
         if iteration == 0:
-            import pickle
-
             temp = self._iris_message_wrapper
             self._iris_message_wrapper = ""  ## can't pickle this
             object.__setattr__(self,"_serial_stream",
-                pickle.dumps(self, protocol=pickle.HIGHEST_PROTOCOL, fix_imports=False),
+                self._dump_by_serializer(self),
             )
             self._iris_message_wrapper = temp
 
@@ -981,3 +1015,19 @@ class PickleSerialize(ProductionMessage):
     def create_iris_message_object_properties(self, message_object):
         for prop in self._column_field_names:
             setattr(message_object, snake_to_pascal(prop), getattr(self, prop))
+
+    @staticmethod
+    def _dump_by_serializer(data: "PickleSerialize") -> bytes:
+        """
+        Dump the data by the pickle serializer.
+        """
+        import pickle
+        return pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL, fix_imports=False)
+
+    @staticmethod
+    def _load_by_serializer(data: bytes) -> "PickleSerialize":
+        """
+        Load the data by the pickle serializer.
+        """
+        import pickle
+        return pickle.loads(data)
